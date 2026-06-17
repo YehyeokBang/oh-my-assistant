@@ -22,19 +22,31 @@ export function createSlackChat(cfg: SlackConfig): ChatPort {
   const allowed = new Set(cfg.allowedUserIds);
   let handler: MessageHandler | null = null;
 
-  app.message(async ({ message }) => {
-    const m = message as any;
-    if (m.subtype) return;                       // 봇/시스템 메시지 무시
-    if (!allowed.has(m.user)) return;            // 화이트리스트 외 무시
+  const dispatch = async (f: { channel: string; user?: string; text: string; ts: string; threadTs?: string }) => {
+    if (!f.user || !allowed.has(f.user)) return;  // 화이트리스트 외 무시
     if (!handler) return;
     const incoming: IncomingMessage = {
-      sessionId: m.thread_ts ?? m.ts,            // 스레드 루트면 자기 ts
-      chatId: m.channel,
-      userId: m.user,
-      text: m.text ?? '',
-      ts: m.ts,
+      sessionId: f.threadTs ?? f.ts,              // 스레드 루트면 자기 ts
+      chatId: f.channel,
+      userId: f.user,
+      text: f.text,
+      ts: f.ts,
     };
     await handler(incoming);
+  };
+
+  // DM (message.im 구독)
+  app.message(async ({ message }) => {
+    const m = message as any;
+    if (m.subtype) return;                        // 봇/시스템 메시지 무시
+    await dispatch({ channel: m.channel, user: m.user, text: m.text ?? '', ts: m.ts, threadTs: m.thread_ts });
+  });
+
+  // 채널 멘션 (app_mention 구독). 멘션 토큰(<@BOTID>)은 제거해 본문만 전달.
+  app.event('app_mention', async ({ event }) => {
+    const e = event as any;
+    const text = (e.text ?? '').replace(/<@[^>]+>/g, '').trim();
+    await dispatch({ channel: e.channel, user: e.user, text, ts: e.ts, threadTs: e.thread_ts });
   });
 
   return {
