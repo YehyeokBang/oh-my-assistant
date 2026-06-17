@@ -131,8 +131,10 @@ export function createClaudeCliLLM(cfg: ClaudeCliConfig, runner: Runner = defaul
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(() => reject(new Error(`타임아웃 ${timeoutMs}ms 초과`)), timeoutMs);
         });
+        const runnerPromise = runner(args, prompt);
+        runnerPromise.catch(() => {});  // 타임아웃으로 버려진 후 늦게 reject돼도 unhandledRejection 방지(상시 구동 프로세스 보호)
         try {
-          const stdout = await Promise.race([runner(args, prompt), timeout]);
+          const stdout = await Promise.race([runnerPromise, timeout]);
           const parsed = parseStreamJson(stdout as string);
           return { task, status: 'done', text: parsed.text, signals: parsed.signals };
         } catch (e) {
