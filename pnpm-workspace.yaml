@@ -3,6 +3,10 @@
 # pnpm 9가 이 파일을 워크스페이스 정의로 읽을 때 "packages field" 에러를 피하려 둔다.
 packages:
   - 'packages/*'
-# 네이티브 빌드 스크립트 실행 허용 목록 (pnpm 11 기본은 차단)
+# 네이티브 빌드 스크립트 실행 허용 (pnpm 기본은 차단).
+# pnpm 11.7.0은 allowBuilds 맵을 사용한다(approve-builds가 기록하는 형식).
+allowBuilds:
+  better-sqlite3: true
+# 구버전 pnpm 호환용(리스트 형식).
 onlyBuiltDependencies:
   - better-sqlite3
