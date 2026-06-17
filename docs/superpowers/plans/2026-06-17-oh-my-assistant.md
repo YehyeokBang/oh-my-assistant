@@ -237,10 +237,21 @@ export interface Message {
   content: string;
 }
 
+export interface RateLimitSignal {
+  status?: string;        // rate_limit_event.rate_limit_info.status
+  rateLimitType?: string; // 예: 'five_hour'
+  resetsAt?: number;      // epoch (sec)
+}
+
 export interface UsageSignals {
-  // M-1 스파이크에서 확정된 필드 경로로 채운다 (한도 소진율 중심).
+  // M-1 스파이크 확정: 토큰/비용은 result.usage·result.total_cost_usd,
+  // 한도는 별도 type:"rate_limit_event" 라인에서 수집(잔여 수치는 미노출).
   inputTokens?: number;
   outputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+  costUsd?: number;             // result.total_cost_usd (구독 한도 소진율 대용 지표)
+  rateLimit?: RateLimitSignal;
   raw?: unknown;
 }
 
@@ -252,8 +263,10 @@ export interface CompleteOpts {
 
 export interface CompleteResult {
   text: string;
-  backend: string; // 'claude-cli' | 'anthropic-api'
+  backend: string;        // 'claude-cli' | 'anthropic-api'
   signals: UsageSignals;
+  isError?: boolean;      // claude-cli result.is_error
+  apiErrorStatus?: number; // claude-cli result.api_error_status (예: 429)
 }
 
 export interface WorkerTask {
@@ -922,7 +935,13 @@ git commit -m "$(printf 'chore: systemd 유닛과 백업 스크립트 골격 추
   - `messagesToPrompt(messages: Message[]): string` — 무상태 호출용 히스토리 직렬화
   - `createClaudeCliLLM(cfg, runner?): LLMPort` — `runner`는 주입 가능(테스트용)
 
-> **M-1 의존**: 아래 `parseStreamJson`은 claude-code의 `--output-format stream-json` 표준 형식(최종 `type: "result"` 라인의 `result` 텍스트 + `usage`)을 가정한다. M-1 findings가 다른 경로를 보고하면 이 함수의 추출 경로만 수정한다(인터페이스 불변).
+> **M-1 확정값 (findings 반영)**:
+> - 최종 텍스트 = `type:"result"` 라인의 `result` 필드(string). 없으면 `type:"assistant"`의 `message.content[].text` 조립.
+> - 에러 = result 라인의 `is_error: true` 또는 `subtype !== 'success'` (+ `api_error_status`).
+> - usage = `result.usage.{input_tokens,output_tokens,cache_creation_input_tokens,cache_read_input_tokens}`, 비용 = `result.total_cost_usd`.
+> - 한도 = **별도** `type:"rate_limit_event"` 라인의 `rate_limit_info.{status,rateLimitType,resetsAt}` (잔여 수치 없음).
+> - `--verbose`는 `--output-format stream-json`과 함께 **필수**(없으면 exit 1).
+> - 파서는 `type` 기준 분기 + **모르는 type은 skip** (jsonl엔 system/hook/init 등 잡라인이 섞임).
 
 - [ ] **Step 1: 파서/직렬화 실패 테스트 작성**
 
@@ -934,21 +953,41 @@ import { parseStreamJson, messagesToPrompt } from '../../../src/adapters/llm/cla
 
 const SAMPLE = [
   JSON.stringify({ type: 'system', subtype: 'init' }),
+  JSON.stringify({ type: 'hook_event' }),                         // 모르는 type → skip
   JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '부분' }] } }),
-  JSON.stringify({ type: 'result', subtype: 'success', result: '최종 답변', usage: { input_tokens: 12, output_tokens: 34 } }),
+  JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '최종 답변', total_cost_usd: 0.012, usage: { input_tokens: 12, output_tokens: 34, cache_read_input_tokens: 5 } }),
 ].join('\n');
 
-test('parseStreamJson은 result 라인의 텍스트와 usage를 추출한다', () => {
+test('parseStreamJson은 result 라인의 텍스트/usage/비용을 추출한다', () => {
   const r = parseStreamJson(SAMPLE);
   assert.equal(r.text, '최종 답변');
   assert.equal(r.backend, 'claude-cli');
   assert.equal(r.signals.inputTokens, 12);
   assert.equal(r.signals.outputTokens, 34);
+  assert.equal(r.signals.cacheReadInputTokens, 5);
+  assert.equal(r.signals.costUsd, 0.012);
 });
 
 test('result 라인이 없으면 assistant 텍스트를 이어붙인다', () => {
   const only = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: '대체' }] } });
   assert.equal(parseStreamJson(only).text, '대체');
+});
+
+test('rate_limit_event 라인을 signals.rateLimit으로 수집한다', () => {
+  const withRl = [
+    JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', resetsAt: 1750000000 } }),
+    JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'ok', usage: {} }),
+  ].join('\n');
+  const r = parseStreamJson(withRl);
+  assert.equal(r.signals.rateLimit?.status, 'rejected');
+  assert.equal(r.signals.rateLimit?.rateLimitType, 'five_hour');
+});
+
+test('is_error result는 isError 플래그를 세운다', () => {
+  const err = JSON.stringify({ type: 'result', subtype: 'error_during_execution', is_error: true, result: '한도 초과', api_error_status: 429, usage: {} });
+  const r = parseStreamJson(err);
+  assert.equal(r.isError, true);
+  assert.equal(r.apiErrorStatus, 429);
 });
 
 test('messagesToPrompt는 역할 라벨을 붙여 직렬화한다', () => {
@@ -993,21 +1032,44 @@ export function messagesToPrompt(messages: Message[]): string {
 export function parseStreamJson(stdout: string): CompleteResult {
   const lines = stdout.trim().split('\n').filter(Boolean);
   let text = '';
-  let signals: UsageSignals = {};
+  let isError = false;
+  let apiErrorStatus: number | undefined;
+  const signals: UsageSignals = {};
   const assistantParts: string[] = [];
   for (const line of lines) {
     let o: any;
     try { o = JSON.parse(line); } catch { continue; }
-    if (o.type === 'assistant') {
-      const c = o.message?.content ?? [];
-      for (const blk of c) if (blk.type === 'text' && blk.text) assistantParts.push(blk.text);
-    } else if (o.type === 'result') {
-      if (typeof o.result === 'string') text = o.result;
-      if (o.usage) signals = { inputTokens: o.usage.input_tokens, outputTokens: o.usage.output_tokens, raw: o.usage };
+    switch (o.type) {                              // 모르는 type은 default로 skip
+      case 'assistant': {
+        for (const blk of o.message?.content ?? []) {
+          if (blk.type === 'text' && blk.text) assistantParts.push(blk.text);
+        }
+        break;
+      }
+      case 'rate_limit_event': {
+        const rl = o.rate_limit_info ?? {};
+        signals.rateLimit = { status: rl.status, rateLimitType: rl.rateLimitType, resetsAt: rl.resetsAt };
+        break;
+      }
+      case 'result': {
+        if (typeof o.result === 'string') text = o.result;
+        if (o.is_error || (o.subtype && o.subtype !== 'success')) isError = true;
+        if (typeof o.api_error_status === 'number') apiErrorStatus = o.api_error_status;
+        if (typeof o.total_cost_usd === 'number') signals.costUsd = o.total_cost_usd;
+        const u = o.usage ?? {};
+        signals.inputTokens = u.input_tokens;
+        signals.outputTokens = u.output_tokens;
+        signals.cacheCreationInputTokens = u.cache_creation_input_tokens;
+        signals.cacheReadInputTokens = u.cache_read_input_tokens;
+        signals.raw = u;
+        break;
+      }
+      default:
+        break;
     }
   }
   if (!text) text = assistantParts.join('');
-  return { text, backend: 'claude-cli', signals };
+  return { text, backend: 'claude-cli', signals, isError, apiErrorStatus };
 }
 
 export interface ClaudeCliConfig {
@@ -1882,7 +1944,10 @@ git commit -m "$(printf 'feat: anthropic-api 폴백 어댑터\n\n- 중립 Messag
 - Consumes: `LLMPort`
 - Produces: `createFallbackLLM(primary: LLMPort, secondary: LLMPort, opts: { isLimitError?: (e: unknown) => boolean; onFallback?: (e: unknown) => void; guard?: CostGuard }): LLMPort`, `createCostGuard(limits): CostGuard`
 
-> **M-1 의존**: `isLimitError`의 판정(레이트리밋/한도 에러 패턴)은 M-1 findings의 에러 형태로 채운다. findings가 "잔량 조회" 경로를 권하면 guard에 조회 훅을 추가한다.
+> **M-1 확정값**: 잔여 수치 조회 API는 없다 → 폴백 트리거는 **에러/이벤트 감지**다. 신호 출처(이미 `CompleteResult`에 노출됨, Task 7):
+> - `result.is_error` + `api_error_status === 429` → `CompleteResult.apiErrorStatus`
+> - `type:"rate_limit_event"`의 `rate_limit_info.status`(예 `rejected`) → `CompleteResult.signals.rateLimit`
+> 이를 위해 claude-cli `complete()`는 한도성 결과일 때 식별 가능한 에러를 throw해야 폴백 래퍼가 잡는다. 본 태스크에서 claude-cli 어댑터의 `complete()`에 "is_error+429 또는 rateLimit.status가 거부면 `RateLimitError` throw" 가드를 추가하고, `isLimitError`가 그 에러를 판정하도록 한다.
 
 - [ ] **Step 1: 실패 테스트 작성**
 
