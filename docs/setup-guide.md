@@ -52,16 +52,18 @@ Socket Mode를 쓰므로 공개 HTTP 엔드포인트·도메인이 필요 없다
 
 ## 2. 인스턴스 런타임/도구 설치 (Linux, 2 vCPU / ~10GB)
 
-대상 OS는 Ubuntu/Debian 계열 가정(`apt`). 다른 배포판이면 패키지명만 치환.
+대상 OS는 Fedora/RHEL/Amazon Linux 2023 계열 가정(`dnf`). 다른 배포판이면 패키지명만 치환.
 
 ### 2.1 시스템 패키지 (better-sqlite3 네이티브 빌드 + 백업 도구)
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y build-essential python3 git sqlite3 gzip curl unzip
+sudo dnf install -y gcc gcc-c++ make python3 git sqlite gzip tar curl unzip
+# 또는 개발도구 묶음으로:
+# sudo dnf groupinstall -y "Development Tools"
+# sudo dnf install -y python3 sqlite gzip tar curl unzip git
 ```
-- `build-essential`/`python3`: `better-sqlite3`가 네이티브 모듈이라 빌드에 필요.
-- `sqlite3`: 백업 스크립트의 `VACUUM INTO`용 CLI.
+- `gcc`/`gcc-c++`/`make`/`python3`: `better-sqlite3`가 네이티브 모듈이라 빌드(node-gyp)에 필요. (apt의 `build-essential` 대응)
+- `sqlite`: 백업 스크립트의 `VACUUM INTO`용 CLI(`sqlite3` 명령 제공). dnf에선 패키지명이 `sqlite`.
 
 ### 2.2 Node — fnm + Node 24 LTS
 
