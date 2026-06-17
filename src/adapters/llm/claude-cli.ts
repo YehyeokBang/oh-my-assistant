@@ -66,6 +66,24 @@ export function parseStreamJson(stdout: string): CompleteResult {
   return { text, backend: 'claude-cli', signals, isError, apiErrorStatus };
 }
 
+export function buildWorkerPrompt(task: { role: string; prompt: string; context?: string }): string {
+  const ctx = task.context ? `\n\n참고 컨텍스트:\n${task.context}` : '';
+  return `너는 "${task.role}" 전문가다. 아래 작업만 독립적으로 수행하고 결과를 간결히 보고하라.${ctx}\n\n작업:\n${task.prompt}`;
+}
+
+async function runWithLimit<T>(items: T[], limit: number, fn: (item: T, index: number) => Promise<unknown>) {
+  const results = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 export interface ClaudeCliConfig {
   defaultModel?: string;
   allowedTools: string[];
@@ -100,9 +118,31 @@ export function createClaudeCliLLM(cfg: ClaudeCliConfig, runner: Runner = defaul
       const stdout = await runner(args, messagesToPrompt(messages));
       return parseStreamJson(stdout);
     },
-    async spawnWorkers(_tasks: WorkerTask[], _opts: SpawnOpts = {}): Promise<WorkerResult[]> {
-      // M2에서 구현. M1 단계에서는 미사용.
-      throw new Error('spawnWorkers는 M2에서 구현된다');
+    async spawnWorkers(tasks: WorkerTask[], opts: SpawnOpts = {}): Promise<WorkerResult[]> {
+      const concurrency = opts.concurrency ?? 3;
+      const timeoutMs = opts.timeoutMs ?? 180000;
+      const tools = opts.allowedTools ?? cfg.allowedTools;
+      const model = opts.model ?? cfg.defaultModel;
+
+      const runOne = async (task: WorkerTask): Promise<WorkerResult> => {
+        const args = buildArgs(model, tools);
+        const prompt = buildWorkerPrompt(task);   // 히스토리 없음 — 역할+프롬프트+컨텍스트만
+        let timer: ReturnType<typeof setTimeout>;
+        const timeout = new Promise<never>((_, reject) => {
+          timer = setTimeout(() => reject(new Error(`타임아웃 ${timeoutMs}ms 초과`)), timeoutMs);
+        });
+        try {
+          const stdout = await Promise.race([runner(args, prompt), timeout]);
+          const parsed = parseStreamJson(stdout as string);
+          return { task, status: 'done', text: parsed.text, signals: parsed.signals };
+        } catch (e) {
+          return { task, status: 'failed', error: e instanceof Error ? e.message : String(e) };
+        } finally {
+          clearTimeout(timer!);
+        }
+      };
+
+      return (await runWithLimit(tasks, concurrency, runOne)) as WorkerResult[];
     },
   };
 }
