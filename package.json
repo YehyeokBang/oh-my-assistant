@@ -5,8 +5,8 @@
   "private": true,
   "packageManager": "pnpm@11.7.0",
   "scripts": {
-    "start": "node src/main.ts",
-    "dev": "node --watch src/main.ts",
+    "start": "node --env-file-if-exists=.env src/main.ts",
+    "dev": "node --watch --env-file-if-exists=.env src/main.ts",
     "test": "node --test"
   },
   "engines": {
