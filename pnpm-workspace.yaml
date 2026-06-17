@@ -1,0 +1,8 @@
+# pnpm 10.16+/11 settings home (구버전의 package.json "pnpm" 필드 대체).
+# packages: 는 단일 패키지라 매칭되는 하위 패키지가 없지만,
+# pnpm 9가 이 파일을 워크스페이스 정의로 읽을 때 "packages field" 에러를 피하려 둔다.
+packages:
+  - 'packages/*'
+# 네이티브 빌드 스크립트 실행 허용 목록 (pnpm 11 기본은 차단)
+onlyBuiltDependencies:
+  - better-sqlite3
