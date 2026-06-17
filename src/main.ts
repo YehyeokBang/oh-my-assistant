@@ -12,7 +12,13 @@ mkdirSync(dirname(cfg.dbPath), { recursive: true });
 const memory = createSqliteMemory(cfg.dbPath);
 const chat = createSlackChat(cfg.slack);
 const llm = createClaudeCliLLM({ defaultModel: cfg.llm.orchestratorModel, allowedTools: cfg.llm.allowedTools });
-const orchestrator = createOrchestrator({ llm, memory, chat, orchestratorModel: cfg.llm.orchestratorModel });
+const orchestrator = createOrchestrator({
+  llm, memory, chat,
+  orchestratorModel: cfg.llm.orchestratorModel,
+  workerModel: cfg.llm.workerModel,
+  workerConcurrency: cfg.worker.concurrency,
+  workerTimeoutMs: cfg.worker.timeoutMs,
+});
 
 chat.onMessage(async (msg) => {
   await orchestrator.handle(msg);
