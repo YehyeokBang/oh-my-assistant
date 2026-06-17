@@ -1,6 +1,8 @@
 import { loadConfig } from './config/index.ts';
 import { createSqliteMemory } from './adapters/memory/sqlite.ts';
 import { createSlackChat } from './adapters/chat/slack.ts';
+import { createClaudeCliLLM } from './adapters/llm/claude-cli.ts';
+import { createOrchestrator } from './core/orchestrator.ts';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 
@@ -9,14 +11,12 @@ mkdirSync(dirname(cfg.dbPath), { recursive: true });
 
 const memory = createSqliteMemory(cfg.dbPath);
 const chat = createSlackChat(cfg.slack);
+const llm = createClaudeCliLLM({ defaultModel: cfg.llm.orchestratorModel, allowedTools: cfg.llm.allowedTools });
+const orchestrator = createOrchestrator({ llm, memory, chat, orchestratorModel: cfg.llm.orchestratorModel });
 
 chat.onMessage(async (msg) => {
-  memory.ensureSession({ id: msg.sessionId, channel: 'slack', chatId: msg.chatId });
-  memory.append({ sessionId: msg.sessionId, ts: Date.now(), direction: 'in', channel: 'slack', payload: { text: msg.text } });
-
-  const reply = `echo: ${msg.text}`;            // M0: 에코. M1에서 LLM 응답으로 교체
-  await chat.replyInThread(msg.chatId, msg.sessionId, reply);
-  memory.append({ sessionId: msg.sessionId, ts: Date.now(), direction: 'out', channel: 'slack', payload: { text: reply } });
+  await chat.sendTyping(msg.chatId);
+  await orchestrator.handle(msg);
 });
 
 await chat.start();
