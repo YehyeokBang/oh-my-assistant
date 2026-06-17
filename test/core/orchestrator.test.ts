@@ -16,7 +16,11 @@ function fakeLLM(answer: string): LLMPort {
 test('단발: 히스토리 적재→complete→스레드 회신→in/out 저장', async () => {
   const memory = createSqliteMemory(':memory:');
   const sent: { chatId: string; threadTs: string; text: string }[] = [];
-  const chat: any = { replyInThread: async (chatId: string, threadTs: string, text: string) => { sent.push({ chatId, threadTs, text }); }, sendTyping: async () => {} };
+  const chat: any = {
+    replyInThread: async (chatId: string, threadTs: string, text: string) => { sent.push({ chatId, threadTs, text }); },
+    addReaction: async () => {},
+    removeReaction: async () => {},
+  };
   const orch = createOrchestrator({ llm: fakeLLM('답'), memory, chat });
 
   await orch.handle({ sessionId: 't1', chatId: 'C1', userId: 'U1', text: '질문1', ts: '1' });

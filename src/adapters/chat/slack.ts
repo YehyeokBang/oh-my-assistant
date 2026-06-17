@@ -66,8 +66,11 @@ export function createSlackChat(cfg: SlackConfig): ChatPort {
         await app.client.chat.postMessage({ channel: chatId, thread_ts: threadTs, text: part });
       }
     },
-    async sendTyping(chatId) {
-      await app.client.chat.postMessage({ channel: chatId, text: '🔎 받았어요…' });
+    async addReaction(chatId, ts, name) {
+      await app.client.reactions.add({ channel: chatId, timestamp: ts, name });
+    },
+    async removeReaction(chatId, ts, name) {
+      await app.client.reactions.remove({ channel: chatId, timestamp: ts, name });
     },
     async start() { await app.start(); },
   };

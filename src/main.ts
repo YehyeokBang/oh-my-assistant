@@ -15,7 +15,6 @@ const llm = createClaudeCliLLM({ defaultModel: cfg.llm.orchestratorModel, allowe
 const orchestrator = createOrchestrator({ llm, memory, chat, orchestratorModel: cfg.llm.orchestratorModel });
 
 chat.onMessage(async (msg) => {
-  await chat.sendTyping(msg.chatId);
   await orchestrator.handle(msg);
 });
 
