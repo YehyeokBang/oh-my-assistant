@@ -30,6 +30,15 @@ application {
     mainClass.set("omabang.engine.MainKt")
 }
 
+// 병렬 위임 콘솔 진입점(P5 수동). application의 기본 run(Phase 0 Main)과 별개. stdin 연결 필수.
+tasks.register<JavaExec>("runOrchestrator") {
+    group = "application"
+    description = "병렬 위임 콘솔 진입점 (Phase 1)"
+    mainClass.set("omabang.engine.orchestrate.OrchestratorMainKt")
+    classpath = sourceSets["main"].runtimeClasspath
+    standardInput = System.`in`
+}
+
 tasks.test {
     // 실제 claude 호출 통합 테스트는 기본 제외(구독 슬롯/시간 소모). 실행: ./gradlew test -Pintegration
     useJUnitPlatform {
