@@ -1,5 +1,6 @@
 package omabang.engine.orchestrate
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -29,6 +30,8 @@ class WorkerPool(private val llm: LlmPort) {
             } ?: return WorkerResult.Failed(task, "timeout ${opts.workerTimeoutMs}ms")
             if (r.isError) WorkerResult.Failed(task, "claude error status=${r.apiErrorStatus}")
             else WorkerResult.Done(task, r.text, r.signals)
+        } catch (ce: CancellationException) {
+            throw ce                                              // 취소는 전파(외부 취소 시 형제도 취소, D2)
         } catch (e: Exception) {
             WorkerResult.Failed(task, e.message ?: e.toString()) // 비-취소 예외는 Failed로 흡수 → 부분 결과 보존
         }

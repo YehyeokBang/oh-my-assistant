@@ -1,6 +1,9 @@
 package omabang.engine.orchestrate
 
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.max
@@ -85,5 +88,26 @@ class WorkerPoolTest {
         )
         val f = results.single() as WorkerResult.Failed
         assertTrue(f.error.contains("timeout"), "타임아웃 표기 누락: ${f.error}")
+    }
+
+    @Test
+    fun `run - 외부 취소 시 워커 본문을 끝까지 돌리지 않고 즉시 취소된다 (P4)`() = runTest {
+        val started = AtomicInteger(0)
+        val completed = AtomicInteger(0)
+        val llm = FakeLlmPort { _, _ ->
+            started.incrementAndGet()
+            delay(60_000)                 // 긴 작업
+            completed.incrementAndGet()   // 취소되면 여기 도달 못 함
+            fakeResult("ok")
+        }
+        val pool = WorkerPool(llm)
+        val job = launch {
+            pool.run((1..4).map { WorkerTask("r$it", "p$it") }, ParallelOpts(concurrency = 4))
+        }
+        runCurrent()                      // 워커 4개 시작(delay 진입)까지
+        assertEquals(4, started.get(), "워커가 시작되지 않음")
+        job.cancelAndJoin()               // 외부 취소
+        assertTrue(job.isCancelled)
+        assertEquals(0, completed.get(), "취소됐는데 워커 본문이 완료됨 = 취소 미전파")
     }
 }
