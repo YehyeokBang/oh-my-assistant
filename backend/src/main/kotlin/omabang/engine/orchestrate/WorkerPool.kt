@@ -5,6 +5,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
 import omabang.engine.CompleteOpts
 import omabang.engine.LlmPort
 import omabang.engine.Message
@@ -22,7 +23,14 @@ class WorkerPool(private val llm: LlmPort) {
         val sys = "너는 \"${task.role}\" 전문가다. 주어진 작업만 독립적으로 수행하고 결과를 간결히 보고하라."
         val user = task.prompt + (task.context?.let { "\n\n참고 컨텍스트:\n$it" } ?: "")
         val co = CompleteOpts(model = opts.model, systemPrompt = sys, allowedTools = opts.allowedTools)
-        val r = llm.complete(listOf(Message(Role.USER, user)), co)
-        return WorkerResult.Done(task, r.text, r.signals)
+        return try {
+            val r = withTimeoutOrNull(opts.workerTimeoutMs) {
+                llm.complete(listOf(Message(Role.USER, user)), co)
+            } ?: return WorkerResult.Failed(task, "timeout ${opts.workerTimeoutMs}ms")
+            if (r.isError) WorkerResult.Failed(task, "claude error status=${r.apiErrorStatus}")
+            else WorkerResult.Done(task, r.text, r.signals)
+        } catch (e: Exception) {
+            WorkerResult.Failed(task, e.message ?: e.toString()) // 비-취소 예외는 Failed로 흡수 → 부분 결과 보존
+        }
     }
 }
