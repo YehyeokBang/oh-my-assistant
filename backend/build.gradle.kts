@@ -2,6 +2,9 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     kotlin("jvm") version "2.3.0"
+    kotlin("plugin.spring") version "2.3.0"
+    id("org.springframework.boot") version "4.1.0"
+    id("io.spring.dependency-management") version "1.1.7"
     application
 }
 
@@ -13,9 +16,12 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
     // JVM엔 내장 JSON이 없다. parseToJsonElement만 쓰므로 컴파일러 플러그인 불필요(런타임 의존성 1개).
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+    implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-reactor:1.11.0")
 
     testImplementation(kotlin("test"))
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.11.0")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
 }
 
 kotlin {
@@ -28,6 +34,14 @@ kotlin {
 
 application {
     mainClass.set("omabang.engine.MainKt")
+}
+
+springBoot {
+    mainClass.set("omabang.web.OmabangApplicationKt")
+}
+
+tasks.bootRun {
+    mainClass.set("omabang.web.OmabangApplicationKt")
 }
 
 // 병렬 위임 콘솔 진입점(P5 수동). application의 기본 run(Phase 0 Main)과 별개. stdin 연결 필수.
