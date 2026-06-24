@@ -37,4 +37,13 @@ class SseMappingTest {
         assertTrue(data.contains("429"))
         assertTrue(data.contains("rate limited"))
     }
+
+    @Test
+    fun error_maps_to_error_event_with_null_status() {
+        val sse = SseMapping.toSse(LlmEvent.Error(null, "unknown"))
+        assertEquals("error", sse.event())
+        val data = sse.data()!!
+        assertTrue(data.contains("\"status\":null"))
+        assertTrue(data.contains("unknown"))
+    }
 }

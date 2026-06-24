@@ -23,7 +23,7 @@ class StreamControllerIntegrationTest {
         val client = HttpClient.newHttpClient()
         val req = HttpRequest.newBuilder(
             URI("http://localhost:$port/api/stream?prompt=" + java.net.URLEncoder.encode("1부터 3까지 세어줘", "UTF-8"))
-        ).build()
+        ).timeout(java.time.Duration.ofSeconds(60)).build()
         val resp = client.send(req, HttpResponse.BodyHandlers.ofString())
 
         assertEquals(200, resp.statusCode())
