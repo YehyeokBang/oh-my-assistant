@@ -36,10 +36,6 @@ application {
     mainClass.set("omabang.engine.MainKt")
 }
 
-springBoot {
-    mainClass.set("omabang.web.OmabangApplicationKt")
-}
-
 tasks.bootRun {
     mainClass.set("omabang.web.OmabangApplicationKt")
 }
