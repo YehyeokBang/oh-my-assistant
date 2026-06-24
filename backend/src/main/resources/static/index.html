@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>oh-my-assistant — 스트리밍</title>
+  <style>
+    body { font-family: sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; }
+    #out { white-space: pre-wrap; border: 1px solid #ccc; border-radius: 8px; padding: 16px; min-height: 120px; margin-top: 16px; }
+    #meta { color: #888; font-size: 0.85em; margin-top: 8px; }
+    input { width: 100%; padding: 8px; font-size: 1em; box-sizing: border-box; }
+  </style>
+</head>
+<body>
+  <h1>스트리밍 첫 뷰</h1>
+  <input id="q" placeholder="프롬프트 입력 후 Enter" autofocus>
+  <div id="out"></div>
+  <div id="meta"></div>
+  <script>
+    const q = document.getElementById('q');
+    const out = document.getElementById('out');
+    const meta = document.getElementById('meta');
+    let es = null;
+    q.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' || !q.value.trim()) return;
+      if (es) es.close();
+      out.textContent = '';
+      meta.textContent = '';
+      es = new EventSource('/api/stream?prompt=' + encodeURIComponent(q.value.trim()));
+      es.addEventListener('delta', (ev) => { out.textContent += ev.data; });
+      es.addEventListener('done', (ev) => { meta.textContent = 'done: ' + ev.data; es.close(); });
+      es.addEventListener('error', (ev) => { meta.textContent = 'error: ' + (ev.data || '(연결 종료)'); es.close(); });
+    });
+  </script>
+</body>
+</html>
